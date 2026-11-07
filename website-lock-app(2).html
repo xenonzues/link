@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Website Lock — Stay in Control</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; font-family:'Segoe UI',system-ui,sans-serif; }
+  body { min-height:100vh; background:linear-gradient(135deg,#1e1b4b,#0f172a 60%,#1e293b); color:#e2e8f0; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .card { width:100%; max-width:460px; background:rgba(30,27,75,.55); backdrop-filter:blur(14px); border:1px solid rgba(255,255,255,.08); border-radius:24px; padding:36px 30px; box-shadow:0 25px 60px rgba(0,0,0,.5); }
+  .lock-icon { font-size:52px; text-align:center; display:block; margin-bottom:8px; }
+  h1 { text-align:center; font-size:1.5rem; font-weight:700; letter-spacing:.5px; }
+  p.sub { text-align:center; color:#94a3b8; font-size:.9rem; margin:8px 0 24px; }
+  label { display:block; font-size:.8rem; color:#a5b4fc; margin:14px 0 6px; text-transform:uppercase; letter-spacing:1px; }
+  input[type=password], input[type=text], input[type=number] { width:100%; padding:13px 16px; border-radius:12px; border:1px solid rgba(255,255,255,.12); background:rgba(15,23,42,.7); color:#e2e8f0; font-size:1rem; outline:none; transition:.2s; }
+  input:focus { border-color:#818cf8; box-shadow:0 0 0 3px rgba(129,140,248,.2); }
+  .row { display:flex; gap:10px; }
+  .row > div { flex:1; }
+  button { width:100%; margin-top:16px; padding:14px; border:none; border-radius:12px; font-size:1rem; font-weight:700; cursor:pointer; transition:.15s; }
+  .primary { background:linear-gradient(90deg,#6366f1,#8b5cf6); color:#fff; }
+  .primary:hover { transform:translateY(-2px); box-shadow:0 10px 25px rgba(99,102,241,.4); }
+  .ghost { background:rgba(255,255,255,.06); color:#cbd5e1; border:1px solid rgba(255,255,255,.1); }
+  .ghost:hover { background:rgba(255,255,255,.12); }
+  .hidden { display:none !important; }
+  .msg { margin-top:14px; text-align:center; font-size:.9rem; min-height:1.2em; }
+  .err { color:#f87171; } .ok { color:#4ade80; }
+  .timer { text-align:center; font-size:3rem; font-weight:800; font-variant-numeric:tabular-nums; margin:18px 0 6px; background:linear-gradient(90deg,#818cf8,#c084fc); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .timer-label { text-align:center; color:#94a3b8; font-size:.85rem; }
+  .site-list { margin-top:14px; max-height:140px; overflow:auto; background:rgba(15,23,42,.5); border-radius:12px; padding:8px; }
+  .site-list div { display:flex; justify-content:space-between; padding:7px 10px; font-size:.9rem; border-bottom:1px solid rgba(255,255,255,.05); }
+  .site-list div:last-child { border-bottom:none; }
+  .site-list span.del { color:#f87171; cursor:pointer; font-weight:700; }
+  .hint { margin-top:18px; font-size:.75rem; color:#64748b; text-align:center; line-height:1.5; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <!-- SETUP -->
+  <div id="setupView">
+    <span class="lock-icon">🔒</span>
+    <h1>Website Lock</h1>
+    <p class="sub">Set your PIN and the minutes each locked session lasts</p>
+    <label>PIN (4–6 digits)</label>
+    <input type="password" id="setupPin" maxlength="6" inputmode="numeric">
+    <label>Confirm PIN</label>
+    <input type="password" id="setupPin2" maxlength="6" inputmode="numeric">
+    <label>Lock duration (minutes)</label>
+    <input type="number" id="setupMin" value="60" min="1" max="1440">
+    <button class="primary" onclick="doSetup()">Create Lock</button>
+    <div class="msg" id="setupMsg"></div>
+  </div>
+
+  <!-- IDLE -->
+  <div id="idleView" class="hidden">
+    <span class="lock-icon">🛡️</span>
+    <h1>Website Lock</h1>
+    <p class="sub">Add the sites you want locked, then start the timer</p>
+    <div class="row">
+      <div><label>Add a site</label><input type="text" id="newSite" placeholder="e.g. instagram.com"></div>
+    </div>
+    <button class="ghost" onclick="addSite()">+ Add to blocklist</button>
+    <div class="site-list" id="siteList"></div>
+    <button class="primary" onclick="startLock()">🔒 Start Lock</button>
+    <div class="msg" id="idleMsg"></div>
+  </div>
+
+  <!-- LOCKED -->
+  <div id="lockedView" class="hidden">
+    <span class="lock-icon">⏳</span>
+    <h1 style="color:#f87171">Sites Locked</h1>
+    <div class="timer" id="countdown">00:00</div>
+    <div class="timer-label">until unlock is possible</div>
+    <div class="site-list" id="lockedSites"></div>
+    <button class="primary" onclick="tryUnlock()">Enter PIN to Unlock Early</button>
+    <div class="msg" id="lockMsg"></div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get pin(){ return localStorage.getItem('wl_pin'); },
+  set pin(v){ v===null ? localStorage.removeItem('wl_pin') : localStorage.setItem('wl_pin', v); },
+  get dur(){ return +(localStorage.getItem('wl_dur') || 60); },
+  set dur(v){ localStorage.setItem('wl_dur', v); },
+  get sites(){ return JSON.parse(localStorage.getItem('wl_sites') || '[]'); },
+  set sites(v){ localStorage.setItem('wl_sites', JSON.stringify(v)); },
+  get until(){ return +(localStorage.getItem('wl_until') || 0); },
+  set until(v){ localStorage.setItem('wl_until', v); }
+};
+const DEFAULT_SITES = ['youtube.com','instagram.com','tiktok.com','twitter.com','facebook.com','reddit.com','netflix.com'];
+
+function show(view){ ['setupView','idleView','lockedView'].forEach(v => $(v).classList.add('hidden')); $(view).classList.remove('hidden'); }
+function fmt(ms){ const s = Math.max(0, Math.ceil(ms/1000)); const m = String(Math.floor(s/60)).padStart(2,'0'), r = String(s%60).padStart(2,'0'); return m+':'+r; }
+
+function route(){
+  const until = store.until;
+  if (until && until > Date.now()){ renderLocked(); show('lockedView'); }
+  else { store.until = 0; if (store.pin){ renderIdle(); show('idleView'); } else show('setupView'); }
+}
+
+function doSetup(){
+  const p1 = $('setupPin').value, p2 = $('setupPin2').value, m = +$('setupMin').value;
+  const msg = $('setupMsg'); msg.className='msg err';
+  if (!/^\d{4,6}$/.test(p1)) { msg.textContent='PIN must be 4–6 digits.'; return; }
+  if (p1 !== p2) { msg.textContent='PINs do not match.'; return; }
+  if (!m || m < 1 || m > 1440) { msg.textContent='Duration must be 1–1440 minutes.'; return; }
+  store.pin = p1; store.dur = m; store.sites = DEFAULT_SITES;
+  msg.className='msg ok'; msg.textContent='Lock created!';
+  setTimeout(route, 600);
+}
+
+function renderIdle(){
+  const list = $('siteList'); list.innerHTML='';
+  store.sites.forEach((s,i)=>{
+    const d = document.createElement('div');
+    d.innerHTML = `<span>🚫 ${s}</span><span class="del" onclick="delSite(${i})">✕</span>`;
+    list.appendChild(d);
+  });
+  if (!store.sites.length) list.innerHTML = '<div style="justify-content:center;color:#64748b">No sites yet</div>';
+}
+
+function addSite(){
+  let s = $('newSite').value.trim().toLowerCase().replace(/^https?:\/\//,'').replace(/\/.*$/,'');
+  const msg = $('idleMsg'); msg.className='msg err';
+  if (!s) { msg.textContent='Enter a website first.'; return; }
+  if (store.sites.includes(s)) { msg.textContent='Already in the list.'; return; }
+  const sites = store.sites; sites.push(s); store.sites = sites;
+  $('newSite').value=''; msg.className='msg ok'; msg.textContent='Added '+s;
+  renderIdle();
+}
+function delSite(i){ const sites = store.sites; sites.splice(i,1); store.sites = sites; renderIdle(); }
+
+function startLock(){
+  if (!store.sites.length){ $('idleMsg').className='msg err'; $('idleMsg').textContent='Add at least one site first.'; return; }
+  store.until = Date.now() + store.dur*60000;
+  renderLocked(); show('lockedView');
+}
+
+function renderLocked(){
+  const list = $('lockedSites'); list.innerHTML='';
+  store.sites.forEach(s=>{ const d=document.createElement('div'); d.innerHTML=`<span>🔒 ${s}</span>`; list.appendChild(d); });
+}
+
+function tryUnlock(){
+  const p = prompt('Enter your PIN to unlock early:');
+  if (p === null) return;
+  const msg = $('lockMsg'); msg.className='msg err';
+  if (p !== store.pin){ msg.textContent='Wrong PIN. Locked sites stay locked.'; return; }
+  store.until = 0; store.pin = null; localStorage.removeItem('wl_sites');
+  msg.className='msg ok'; msg.textContent='Unlocked. PIN cleared for fresh setup.';
+  setTimeout(()=>{ show('setupView'); $('setupMsg').textContent=''; }, 800);
+}
+
+// countdown loop
+setInterval(()=>{
+  const until = store.until;
+  if (until && until > Date.now()){
+    $('countdown').textContent = fmt(until - Date.now());
+  } else if (until){
+    store.until = 0; store.pin = null; localStorage.removeItem('wl_sites');
+    route();
+  }
+}, 500);
+
+route();
+</script>
+</body>
+</html>
